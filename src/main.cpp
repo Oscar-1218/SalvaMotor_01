@@ -8,15 +8,17 @@ byte aceiteActual;
 byte aceiteDespues;
 byte tempActual;
 byte tempDespues;
+
 // Posición de MEMORIA Eeprom valores antes y pos encendido
 const byte actualAceiteEeprom = 1; //ESPACIO de valor antes del fallo de aceite y que en su proxima encendida se debe actualizar.
 const byte fallaAceiteEeprom = 2; //ESPACIO de  valor que debe cambiar cuando se produce la falla.
 const byte actualTempEeprom = 3;
 const byte fallaTempEeprom = 4;
 
+//INVENTAR: si cada 10" está SIN inputAceite, acumular en variable para que,si en reiteradas ocaciones de todos modos lo termine apagando.
 byte inputPres = A0; //representa la presion de aceite. \Esto SE REEMPLAZA(cuando este en el auto)
-byte inputTemp = A1; //repre la temperatura.            \Esto SE REEMPLAZA(cuando este en el auto)
-int inputBat = A2; //repre la carga bateria.            \Esto SE REEMPLAZA(cuando este en el auto)
+byte inputTemp = A1; //repre la temperatura.                         \Esto SE REEMPLAZA(cuando este en el auto)
+int inputBat = A2; //repre la carga bateria.                          \Esto SE REEMPLAZA(cuando este en el auto)
 const byte ledAceite = 13;
 const byte ledTemp = 12;
 const byte ledBat = 11;
@@ -30,8 +32,10 @@ const double batHigh = 150.7 ;// var de bateria(Alto(constante)!)
 const short int espera = 2000;
 byte cortaCorriente = 9;
 bool estadoArranque = false;
+bool valor = true;
 byte prolongarApagado = LOW;
 byte ledFalla = ledOk;
+byte senalArranque = 5; /*mmm*/
 
 
 void enContacto();
@@ -63,6 +67,7 @@ void setup() {
   pinMode(inputBat, INPUT);
   pinMode(7, INPUT);
   digitalWrite(cortaCorriente, LOW); // CortaCorriente del motor N/A(No esta activado)
+  pinMode(senalArranque,INPUT);
   pinMode(2, LOW);
   pinMode(3, INPUT_PULLUP);
   // Configuramos los pines de interrupciones para que detecten un cambio de bajo a alto
@@ -75,15 +80,17 @@ void setup() {
   tempActual = EEPROM.read(actualTempEeprom);
   tempDespues = EEPROM.read(fallaTempEeprom);
 
-  if(aceiteActual != aceiteDespues){ //enciendo led rojo parpadeante y acualizo el valor en  la eeprom.
+  if(aceiteActual != aceiteDespues){
+    //enciendo led rojo parpadeante y acualizo el valor en  la eeprom.
     EEPROM.update(actualAceiteEeprom, aceiteDespues);
     digitalWrite(ledAceite,1);     
   }
+
   if(tempActual != tempDespues){
+    //enciendo led rojo parpadeante y acualizo el valor en  la eeprom.
     EEPROM.update(actualTempEeprom, tempDespues);
     digitalWrite(ledTemp,1);     
   }
-
   
   enContacto();
 }
@@ -134,7 +141,6 @@ void problemaTemperatura(bool verifTemp) {
       if(temp == LOW) {
         Serial.println("Temperatura: Apagar motor");
 
-    /*IMPLEMENACION*/
         tempActual = EEPROM.read(actualTempEeprom);
         EEPROM.write(fallaTempEeprom, (tempActual+1));
         tempDespues = EEPROM.read(fallaTempEeprom);
@@ -213,15 +219,13 @@ void interrumpirApagado(byte ledFalla){
   digitalWrite(sound, 1);
   delay(100);
   digitalWrite(sound, 0); //↑↑ Estas 7 lineas Deben modificar el sonido. 
-  for (byte i = 0; i < 10; i++) {
+  for (byte i = 0; i < 20; i++) {
     prolongarApagado = LOW;
-    digitalWrite(ledOk, 1);
-    digitalWrite(ledFalla,1);
+    digitalWrite(ledOk, valor); //asi comienza encendido
+    digitalWrite(ledFalla, valor); //asi comienza encendido
+    valor = !valor;
     delay(400);
-    digitalWrite(ledOk, 0);
-    digitalWrite(ledFalla,0);
-    delay(400);
-    if(i == 10){ //Avisa que se termino el InterrumpirApagado.
+    if(i == 20){ //Avisa que se termino el InterrumpirApagado.
       digitalWrite(sound, 1);
       delay(300);
       digitalWrite(sound, 0);
@@ -240,21 +244,20 @@ void interm_ledYsound(byte ledFalla){
 }
 
 void dioArranque() {
-  estadoArranque = true; //ES NEG PASA A POSI, luego es posi, pasa a nega
+  estadoArranque = true; //inicia en neg y pasa a positivo
   digitalWrite(ledAceite,0); 
   digitalWrite(ledTemp,0); 
 }
 
 void enContacto() {
-  if(!estadoArranque) { //si es negativo hace esto
-    digitalWrite(ledOk, 1);
-    delay(200);
-    digitalWrite(ledOk, 0);
+  while(!estadoArranque) {
+    digitalWrite(ledOk,valor);
+    valor = !valor;
     delay(200);
     Serial.println((String)"estadoArranque: " + estadoArranque);
-    enContacto();
   } 
 }
+
 
 
 //PLATFORMIO PIDE QUE TODO SE DECLARE ANTES DE SER LLAMADO.
@@ -262,25 +265,29 @@ void loop() {
   ledFalla = ledOk;
   digitalWrite(ledOk, 1); 
 
-  //POSTERGAR FUNCIONAMIENTO SI NO ARRANCA A LA PRIMERA
+  //POSTERGA FUNCIONAMIENTO SI NO ARRANCA A LA PRIMERA
+  bool valorSenalArranque = digitalRead(senalArranque);
+  Serial.println((String)"valorSenalArranque "+valorSenalArranque);
+  if(senalArranque == 1){
+    estadoArranque = false;
+    //if(!estadoArranque){}
+    enContacto();
     
-  enContacto();
-    
- //corregir fallo de que si apreto 8 veces el interrup apagado, pasaran 80' hasta apagarse
+  } //corregir fallo de que si apreto 8 veces el interrup apagado, pasaran 80' hasta apagarse
 
   //FUNCIONES
-  if(prolongarApagado == HIGH){
-    interrumpirApagado(ledFalla);
-  }
-    
-  //verificaion Booleana
-  refrescarDatos();
-  bool verifBat = bat < batLow || bat > batHigh;
-    if(verifBat){problemaCargabateria(verifBat);}
-  bool verifTemp = temp ==  LOW && pres ==  HIGH ;
-    if(verifTemp){problemaTemperatura(verifTemp); }
-  bool verifPresAceite = pres == LOW;
-    if(verifPresAceite){problemaPresionAceite(verifPresAceite);}
-  Serial.println((String)"verifBat: "+verifBat+ "/ verifTemp:"+ verifTemp+"/ verifPresAceite:"+verifPresAceite);
+if(prolongarApagado == HIGH){
+  interrumpirApagado(ledFalla);
+}
+  
+//verificaion Booleana
+refrescarDatos();
+bool verifBat = bat < batLow || bat > batHigh;
+  if(verifBat){problemaCargabateria(verifBat);}
+bool verifTemp = temp ==  LOW && pres ==  HIGH ;
+  if(verifTemp){problemaTemperatura(verifTemp); }
+bool verifPresAceite = pres == LOW;
+  if(verifPresAceite){problemaPresionAceite(verifPresAceite);}
+Serial.println((String)"verifBat: "+verifBat+ "/ verifTemp:"+ verifTemp+"/ verifPresAceite:"+verifPresAceite);
   
 }
